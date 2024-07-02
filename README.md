@@ -1,38 +1,88 @@
 # SCT_SD_4 
-import requests
-from bs4 import BeautifulSoup
-import csv
+#include <iostream>
+#include <fstream>
+#include <vector>
+#include <string>
+#include <curl/curl.h>
+#include "pugixml.hpp"
 
-# URL of the e-commerce website's product listing page
-url = "http://example.com/products"
+// Function to write data received by libcurl
+size_t WriteCallback(void* contents, size_t size, size_t nmemb, std::string* s) {
+    s->append((char*)contents, size * nmemb);
+    return size * nmemb;
+}
 
-# Send a request to the website
-response = requests.get(url)
-response.raise_for_status()  # Ensure the request was successful
+// Function to fetch HTML content from a URL
+std::string fetchHTML(const std::string& url) {
+    CURL* curl;
+    CURLcode res;
+    std::string readBuffer;
 
-# Parse the HTML content of the page
-soup = BeautifulSoup(response.text, 'html.parser')
+    curl = curl_easy_init();
+    if (curl) {
+        curl_easy_setopt(curl, CURLOPT_URL, url.c_str());
+        curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, WriteCallback);
+        curl_easy_setopt(curl, CURLOPT_WRITEDATA, &readBuffer);
+        res = curl_easy_perform(curl);
+        curl_easy_cleanup(curl);
+    }
+    return readBuffer;
+}
 
-# Find the container that holds product information
-products = soup.find_all('div', class_='product-item')
+// Function to parse HTML content and extract product information
+std::vector<std::vector<std::string>> parseHTML(const std::string& html) {
+    std::vector<std::vector<std::string>> productData;
 
-# List to hold extracted product information
-product_data = []
+    pugi::xml_document doc;
+    pugi::xml_parse_result result = doc.load_string(html.c_str());
 
-for product in products:
-    name = product.find('h2', class_='product-name').text.strip()
-    price = product.find('span', class_='product-price').text.strip()
-    rating = product.find('span', class_='product-rating').text.strip()
-    
-    product_data.append([name, price, rating])
+    if (result) {
+        // Assuming products are contained within <div class="product-item">
+        pugi::xpath_node_set products = doc.select_nodes("//div[@class='product-item']");
 
-# Define the CSV file header
-header = ['Name', 'Price', 'Rating']
+        for (auto product : products) {
+            std::vector<std::string> productInfo;
+            std::string name = product.node().child("h2").child_value("product-name");
+            std::string price = product.node().child("span").child_value("product-price");
+            std::string rating = product.node().child("span").child_value("product-rating");
 
-# Write data to a CSV file
-with open('products.csv', 'w', newline='', encoding='utf-8') as file:
-    writer = csv.writer(file)
-    writer.writerow(header)
-    writer.writerows(product_data)
+            productInfo.push_back(name);
+            productInfo.push_back(price);
+            productInfo.push_back(rating);
 
-print("Product information extracted and saved to products.csv")
+            productData.push_back(productInfo);
+        }
+    }
+
+    return productData;
+}
+
+// Function to write product data to a CSV file
+void writeCSV(const std::string& filename, const std::vector<std::vector<std::string>>& data) {
+    std::ofstream file(filename);
+
+    // Write the header
+    file << "Name,Price,Rating\n";
+
+    // Write the data
+    for (const auto& product : data) {
+        file << product[0] << "," << product[1] << "," << product[2] << "\n";
+    }
+
+    file.close();
+}
+
+int main() {
+    std::string url = "http://example.com/products";
+    std::string htmlContent = fetchHTML(url);
+
+    std::vector<std::vector<std::string>> productData = parseHTML(htmlContent);
+
+    writeCSV("products.csv", productData);
+
+    std::cout << "Product information extracted and saved to products.csv" << std::endl;
+
+    return 0;
+}
+
+
